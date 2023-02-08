@@ -116,26 +116,3 @@ jobs:
         AKS_MANAGED_ID_PRINCIPAL_ID=$(az identity list -g $AKS_CLUSTER_RESOURCE_GROUP -o json | grep "principalId" | awk -F ":" '{print $2}' | sed 's/"//g; s/,//g') 
         az keyvault set-policy --name "$KEY_VAULT_NAME" --key-permissions get list recover --secret-permissions get list recover --certificate-permissions get list --object-id $AKS_MANAGED_ID_PRINCIPAL_ID
 
-    # ideally we should follow the below and do it with aks configs
-    # See RD-142 could add inline in the workflow or also in the ingress-nginx-install script too
-    # TODO: https://learn.microsoft.com/en-us/azure/aks/coredns-custom
-    # I.e. so in develop, would need to update DNS zones (use same for each additional environment and the requisite DNS zones)
-    # develop.mycompany.com
-    # therapyview-develop.mycompany.com
-    # clientlogs-develop.mycompany.com
-    #
-    # update all expected services: clientlogs, hasura, therapyview
-    #- name: hack DNS script for now TODO see RD-142
-    #  env: 
-    #      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-    #      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-    #      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-    #      DNS_ZONE_RESOURCE_GROUP: ${{ env.DNS_ZONE_RESOURCE_GROUP }}
-    #  run: |
-    #    # configure keyvault access for the SP "Application" i.e.: 'devtestdevops'
-    #    EXTERNAL_IP=$(kubectl get svc -n ingress-nginx | grep 'LoadBalancer' | awk '{print$4}') && echo "EXTERNAL_IP: $EXTERNAL_IP"
-         # modify an 'A' record, from IP address 1.2.3.4 to IP address 5.6.7.8:
-         # az network dns record-set a add-record --resource-group $DNS_ZONE_RESOURCE_GROUP --zone-name contoso.com --record-set-name www --ipv4-address 5.6.7.8
-         # az network dns record-set a remove-record --resource-group $DNS_ZONE_RESOURCE_GROUP --zone-name contoso.com --record-set-name www --ipv4-address 1.2.3.4
-         # ...
-
