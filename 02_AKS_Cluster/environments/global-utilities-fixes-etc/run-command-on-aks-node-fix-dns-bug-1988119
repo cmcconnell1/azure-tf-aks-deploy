@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# if nodes are unhealthy or NotReady running commands on them will likely fail--did for me and azure tier-1 escalation so might need to skip broken nodes
+kubectl get no -o json | jq -r '.items[].spec.providerID' | cut -c 9- | az vmss run-command invoke --ids @- \
+  --command-id RunShellScript \
+  --scripts 'grep nameserver /etc/resolv.conf || { dhclient -x; dhclient -i eth0; sleep 10; pkill dhclient; grep nameserver /etc/resolv.conf; }'
+
+
+# run on specific node
+# az vmss run-command invoke -g MC_rg-developaksterraform_aks-developaksterraform_westus3 -n aks-aks-24838650-vmss --command-id RunShellScript --instance-id 1 \
+#    --query 'value[0].message' --scripts 'grep nameserver /etc/resolv.conf || { dhclient -x; dhclient -i eth0; sleep 10; pkill dhclient; grep nameserver /etc/resolv.conf; }'
+
+
+# fix older AKS cluster with VMs without scale sets, fixed those with:
+# az vm availability-set list -g <resourcegroup> --query "[].virtualMachines[].id" --output tsv | az vm run-command invoke --scripts "echo FallbackDNS=168.63.129.16 >> /etc/systemd/resolved.conf; systemctl restart systemd-resolved.service" --command-id RunShellScript --ids @-

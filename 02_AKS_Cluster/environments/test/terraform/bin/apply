@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# TEST ENV
+# this script is not needed during normal github actions operations but good for testment and troubleshooting etc.
+
+# this is the azure tenant
+export MY_ENV="devtest"
+
+INPUT_VARS_FILE="../../../../Azure-Pre-Reqs/${MY_ENV}githubactions-vars"
+
+printf "\n"
+printf "Set our key/value pairs from the deployment outfile: $INPUT_VARS_FILE\n"
+printf "########################################\n"
+
+while IFS=: read -r KEY VALUE; do
+  export "$KEY"="$VALUE";
+  #printf "KEY: $KEY VALUE: $VALUE\n"
+done <"${INPUT_VARS_FILE}"
+
+########################################
+# set specific ENV-SPECIFIC VARS
+# that get set with azure-login
+########################################
+export AZURE_KEY_VAULT_NAME="${MY_ENV}devops" # the azure keyvault to fetch the creds from
+
+########################################
+# fetch secrets from azure key vault
+export ARM_CLIENT_ID=$(az keyvault secret show --name "${MY_ENV}-service-principal-client-id" --vault-name $AZURE_KEY_VAULT_NAME --query "value" | sed 's/,//g; s/"//g')
+
+export ARM_CLIENT_SECRET=$(az keyvault secret show --name "${MY_ENV}-service-principal-client-secret" --vault-name $AZURE_KEY_VAULT_NAME --query "value" | sed 's/,//g; s/"//g')
+
+export ARM_TENANT_ID=$(az keyvault secret show --name "${MY_ENV}-service-principal-tenant-id" --vault-name $AZURE_KEY_VAULT_NAME --query "value" | sed 's/,//g; s/"//g')
+
+export ARM_SUBSCRIPTION_ID=$(az keyvault secret show --name "${MY_ENV}-service-principal-subscription-id" --vault-name $AZURE_KEY_VAULT_NAME --query "value" | sed 's/,//g; s/"//g')
+
+az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
+
+terraform apply -auto-approve -var-file=./test.tfvars -var "ARM_CLIENT_ID=$ARM_CLIENT_ID" -var "ARM_CLIENT_SECRET=$ARM_CLIENT_SECRET" -var "ARM_TENANT_ID=$ARM_TENANT_ID" -var "ARM_SUBSCRIPTION_ID=$ARM_SUBSCRIPTION_ID"

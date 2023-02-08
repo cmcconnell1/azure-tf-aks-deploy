@@ -1,0 +1,60 @@
+name: 'DEVELOP_DESTROY_AKS'
+
+#on: [pull_request, workflow_dispatch]
+on: [workflow_dispatch]
+
+env:
+  TF_LOG: INFO
+  TF_VERSION: 1.2.6 ## Terraform version e.g: 1.1.0 Default=latest (Optional)
+  TF_ENVIRONMENT: develop ## this is a env var for the requisite terraform env and vars file
+  TF_KEY: develop-aks-cluster-tfstate ## AZ backend - Specifies name that will be given to terraform state file and plan artifact (Required)
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+    environment: develop    ## this sets the github project environment
+
+    # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
+    # Set the working directory to main for the config files
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./02_AKS_Cluster/environments/develop/terraform
+
+    env:
+      # we should only have to change MY_ENV for each distinct environment
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+      RESOURCE_GROUP: devtestdevops  ## AZ backend - AZURE Resource Group hosting terraform backend storage acc (Required)
+      STORAGE_ACCOUNT: devtestdevops29003 ## AZ backend - AZURE terraform backend storage acc (Required)
+      CONTAINER_NAME: develop-aks-cluster-tfstate ## AZ backend - AZURE storage container hosting state files (Required)
+
+    steps:
+    # Checkout the repository to the GitHub Actions runner
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    # Install the preferred version of Terraform CLI
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: ${{ env.TF_VERSION }} 
+
+    # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
+    - name: Terraform Init
+      id: init
+      run: terraform init -backend-config="storage_account_name=$STORAGE_ACCOUNT" -backend-config="container_name=$CONTAINER_NAME" -backend-config="resource_group_name=$RESOURCE_GROUP" -backend-config="key=$TF_KEY"
+
+    # Run an initial terraform destroy 
+    - name: First Terraform Destroy
+      id: destroy1
+      run: terraform destroy -auto-approve -var-file=./${{ env.TF_ENVIRONMENT }}.tfvars -no-color -var "ARM_CLIENT_ID=$ARM_CLIENT_ID" -var "ARM_CLIENT_SECRET=$ARM_CLIENT_SECRET" -var "ARM_TENANT_ID=$ARM_TENANT_ID" -var "ARM_SUBSCRIPTION_ID=$ARM_SUBSCRIPTION_ID"
+
+    # Run a second terraform if/as needed as sometimes the AKS cluster delete with everything in it takes too long and we may have lingering cruft
+    - name: Second Terraform Destroy in case AKS destroy takes too long
+      id: destroy2
+      run: terraform destroy -auto-approve -var-file=./${{ env.TF_ENVIRONMENT }}.tfvars -no-color -var "ARM_CLIENT_ID=$ARM_CLIENT_ID" -var "ARM_CLIENT_SECRET=$ARM_CLIENT_SECRET" -var "ARM_TENANT_ID=$ARM_TENANT_ID" -var "ARM_SUBSCRIPTION_ID=$ARM_SUBSCRIPTION_ID"

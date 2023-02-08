@@ -1,0 +1,15 @@
+#!/bin/bash
+
+helm uninstall ingress-nginx -n ingress-nginx
+
+# clean delete secretproviderclass
+#kubectl delete secretproviderclass/ingress-tls-csi-develop -n ingress-nginx
+#kubectl delete secretproviderclass/ingress-tls-csi-mycompany -n ingress-nginx
+
+# clean delete ingress note k8s is NOT good about updating ing delete then re-apply
+#kubectl delete ing/ingress-tls-csi-develop -n ingress-nginx
+#kubectl delete ing/ingress-tls-csi-mycompany -n ingress-nginx
+
+# TODO: remove some below cruft later after we move these test services into another NS
+kubectl delete ns ingress-nginx --grace-period=0
+

@@ -1,0 +1,11 @@
+DATE_TAG:2022.03.03.12.42.17
+ENV:devtest
+SUBSCRIPTION_ID:xxxxxxxxxxxxxxx
+MY_RANDOM:29003
+LOCATION:westus
+RESOURCE_GROUP:devtestdevops
+STORAGE_ACCOUNT_NAME:devtestdevops29003
+CONTAINER_NAME:devtestdevopstfstate
+ENV_TAG:environment=devtestdevops
+SP_NAME:devtestdevops
+AZURE_KEY_VAULT_NAME:devtestdevops

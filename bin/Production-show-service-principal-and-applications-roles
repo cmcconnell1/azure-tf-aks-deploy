@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+SP="proddevops"
+
+SP_APP_ID=$(az ad app list --display-name $SP --query [].appId -o tsv)
+
+echo "Get the Service Principals APP_ID --all and role assignment:"
+az role assignment list --assignee $SP_APP_ID --all
+
+# get our subscriptionId
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+echo "SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
+

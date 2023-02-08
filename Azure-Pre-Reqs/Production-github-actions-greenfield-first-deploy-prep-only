@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -x
+
+# This Azure CLI script helps prepare everything we need to run Terraform in GitHub Actions. 
+# It only needs to be run once for each distinct environment--i.e.: develop, test, stage, prod
+
+# This script does the following:
+    # Creates the storage account and container to store Terraform state remotely.
+    # Creates a Service Principal and then assigns contributor at tenant root. 
+    # Note: we should reduce the scope for our deployments down to single Subscriptions (and therefore environments--for many reasons)
+    # One main reason is the broken paradym of terraform handling multiple enviroments natively and requisite remote env-specific state-file & locking, etc.
+az login
+
+########################################
+# UPDATE THESE ENV-SPECIFIC VARS
+########################################
+# Update the the ENV                                            # should have separate scripts for all envs: "develop, "test" "stage" note that "production" in sep tenant.
+export CLOUD_ENV="prod"                                            # 
+export SUBSCRIPTION_ID="xxxxxxxxxxxxxxx"   # the ID of the Subscription to deploy the Resource Group and Storage Account into. 
+
+########################################
+export MY_RANDOM="${RANDOM}"
+export LOCATION="westus"                                        # the Resource Group and Storage Account LOCATION.
+export RESOURCE_GROUP="${CLOUD_ENV}devops"                            # the Resource Group name the Storage Account will be deployed into.
+export STORAGE_ACCOUNT_NAME="${CLOUD_ENV}devops${MY_RANDOM}"   # the Storage Account name - note this must be unique!
+export CONTAINER_NAME="${CLOUD_ENV}devopstfstate"              # the Container name.
+export ENV_TAG="environment=${CLOUD_ENV}devops"                # the Environment Tag applied to the Resource Group and Storage Account.
+export SP_NAME="${CLOUD_ENV}devops"                            # the Service Principal Name
+export AZURE_KEY_VAULT_NAME="${CLOUD_ENV}devops${MY_RANDOM}"               # the azure keyvault to store the SERVICE_PRINCIPAL secrets into.
+########################################
+
+export DATE_TAG=$(date "+%Y.%m.%d.%H.%M.%S")
+
+# Creates Resource Group and Storage Account for TF State File Storage
+az account set -s $SUBSCRIPTION_ID
+az group create --location $LOCATION --name $RESOURCE_GROUP --tags $ENV_TAG
+az storage account create --location $LOCATION --resource-group $RESOURCE_GROUP --name $STORAGE_ACCOUNT_NAME --tags $ENV_TAG --https-only --sku Standard_LRS --encryption-services blob --subscription $SUBSCRIPTION_ID
+export STORAGE_ACCOUNT_KEY=$(az storage account keys list --resource-group $RESOURCE_GROUP --account-name $STORAGE_ACCOUNT_NAME --query '[0].value' -o tsv)
+az storage container create --name $CONTAINER_NAME --account-name $STORAGE_ACCOUNT_NAME --account-key $STORAGE_ACCOUNT_KEY
+
+# create the requisite azure key vault for the $CLOUD_ENV-devops
+az keyvault create --name "$AZURE_KEY_VAULT_NAME" --resource-group "$RESOURCE_GROUP" --location "$LOCATION"
+az keyvault update --name "$AZURE_KEY_VAULT_NAME" --resource-group "$RESOURCE_GROUP" --enabled-for-deployment "true"
+# grant the role assignment provides ability to list key vault objects in key vault
+
+# Creates Service Principal for TF to use and gives root Contributor access. 
+# we keep this file to get sensitive credentials from it -- it should not be checked into git.
+#SERVICE_PRINCIPAL=$(az ad sp create-for-rbac --role Contributor -n $SP_NAME --sdk-auth)
+echo
+echo "create Service Principle: $SP_NAME"
+echo
+export SERVICE_PRINCIPAL=$(az ad sp create-for-rbac -n "$SP_NAME" --sdk-auth --years 2 | tee "./secrets/$CLOUD_ENV-service_principal.json")
+
+#echo "sleep due to ms azure error: 'this error might be related to a replication delay...'"
+#sleep 15
+
+# fetch var and create secrets
+export SERVICE_PRINCIPAL_CLIENT_ID=$(cat "./secrets/$CLOUD_ENV-service_principal.json" | grep 'clientId' | awk -F ":" '{print $2}' | sed 's/,//g; s/"//g')
+az keyvault secret set --vault-name $AZURE_KEY_VAULT_NAME --name "$CLOUD_ENV-service-principal-client-id" --value $SERVICE_PRINCIPAL_CLIENT_ID --encoding ascii
+# update Azure Key Vault to allow our Service Principal to be used for deployment and to be able to retrieve secrets from Key Vault
+az keyvault set-policy --name "$AZURE_KEY_VAULT_NAME" --spn $SERVICE_PRINCIPAL_CLIENT_ID --secret-permissions list get #set delete
+
+export SERVICE_PRINCIPAL_CLIENT_SECRET=$(cat "./secrets/$CLOUD_ENV-service_principal.json" | grep 'clientSecret' | awk -F ":" '{print $2}' | sed 's/,//g; s/"//g')
+az keyvault secret set --vault-name $AZURE_KEY_VAULT_NAME --name "$CLOUD_ENV-service-principal-client-secret" --value $SERVICE_PRINCIPAL_CLIENT_SECRET --encoding ascii
+
+export SERVICE_PRINCIPAL_TENANT_ID=$(cat "./secrets/$CLOUD_ENV-service_principal.json" | grep 'tenantId' | awk -F ":" '{print $2}' | sed 's/,//g; s/"//g')
+az keyvault secret set --vault-name $AZURE_KEY_VAULT_NAME --name "$CLOUD_ENV-service-principal-tenant-id" --value $SERVICE_PRINCIPAL_TENANT_ID --encoding ascii
+
+export SERVICE_PRINCIPAL_SUBSCRIPTION_ID=$(cat "./secrets/$CLOUD_ENV-service_principal.json" | grep 'subscriptionId' | awk -F ":" '{print $2}' | sed 's/,//g; s/"//g')
+az keyvault secret set --vault-name $AZURE_KEY_VAULT_NAME --name "$CLOUD_ENV-service-principal-subscription-id" --value $SERVICE_PRINCIPAL_SUBSCRIPTION_ID --encoding ascii
+
+
+echo 
+echo "az role assignment Key Vault Reader" 
+# ref: https://docs.microsoft.com/en-us/cli/azure/role/assignment?view=azure-cli-latest#az-role-assignment-create-examples
+#az role assignment create --assignee 00000000-0000-0000-0000-000000000000 --role "Storage Account Key Operator Service Role" --scope $id
+az role assignment create --assignee $SERVICE_PRINCIPAL_CLIENT_ID --role "Key Vault Reader" --scope "/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP}"
+echo 
+
+# create the contributor role
+#az role assignment create --role 'Owner' --assignee $SERVICE_PRINCIPAL_CLIENT_ID --scope "/"
+#az role assignment create --assignee 00000000-0000-0000-0000-000000000000 --role "Storage Account Key Operator Service Role" --scope $id
+echo 
+echo "az role assignment to $SERVICE_PRINCIPAL_CLIENT_ID --role 'Owner' --scope /subscriptions/${SUBSCRIPTION_ID}" 
+echo
+az role assignment create --assignee $SERVICE_PRINCIPAL_CLIENT_ID --role 'Owner' --scope "/subscriptions/${SUBSCRIPTION_ID}"
+
+# gitignore will not add files in the ./secrets dir
+#rm -fr "./secrets/$CLOUD_ENV-service_principal.json"
+echo "fetch newly created azure key vault secrets:"
+for AZURE_KEY_VAULT_SECRET in "$CLOUD_ENV-service-principal-client-id" "$CLOUD_ENV-service-principal-client-secret" "$CLOUD_ENV-service-principal-tenant-id" "$CLOUD_ENV-service-principal-subscription-id" ; do
+    echo
+    echo "$AZURE_KEY_VAULT_SECRET:"
+    az keyvault secret show --name $AZURE_KEY_VAULT_SECRET --vault-name $AZURE_KEY_VAULT_NAME --query "value"
+done
+
+########################################
+# create our deployment vars file for validate and fetching secrets from the key vault--we need these for github secrets and terraform provider config
+OUTPUT_VARS_FILE="./Azure-Pre-Reqs/${CLOUD_ENV}githubactions-vars"
+printf "Update the the ENV deploy file for later reference to help us fetch resources, etc."
+printf "DATE_TAG:$DATE_TAG\n" > "${OUTPUT_VARS_FILE}"
+printf "ENV:$CLOUD_ENV\n" >> "${OUTPUT_VARS_FILE}" 
+printf "SUBSCRIPTION_ID:$SUBSCRIPTION_ID\n" >> "${OUTPUT_VARS_FILE}"
+printf "MY_RANDOM:$MY_RANDOM\n" >> "${OUTPUT_VARS_FILE}"
+printf "LOCATION:$LOCATION\n" >> "${OUTPUT_VARS_FILE}"
+printf "RESOURCE_GROUP:$RESOURCE_GROUP\n" >> "${OUTPUT_VARS_FILE}"
+printf "STORAGE_ACCOUNT_NAME:$STORAGE_ACCOUNT_NAME\n" >> "${OUTPUT_VARS_FILE}"
+printf "CONTAINER_NAME:$CONTAINER_NAME\n" >> "${OUTPUT_VARS_FILE}"
+printf "ENV_TAG:$ENV_TAG\n" >> "${OUTPUT_VARS_FILE}"
+printf "SP_NAME:$SP_NAME\n" >> "${OUTPUT_VARS_FILE}"
+printf "AZURE_KEY_VAULT_NAME:$AZURE_KEY_VAULT_NAME\n" >> "${OUTPUT_VARS_FILE}"
+
+echo
+########################################
+# Information to setup GitHub Secrets and Terraform backend configuration is output by the script below. 
+########################################
+echo "
+
+#########################
+Terraform Backend config:
+Azure storage account details that we must add to the Terraform Backend Configuration--these go into the providers.tf file:
+Resource Group: $RESOURCE_GROUP
+Storage Account: $STORAGE_ACCOUNT_NAME
+Container Name: $CONTAINER_NAME
+
+i.e.:  where XXXX is the required GLOBALLY unique storage_account_name--we ensure this using \$RANDOM
+  backend "azurerm" {
+      resource_group_name  = "${CLOUD_ENV}devops"
+      storage_account_name = "${CLOUD_ENV}devops${MY_RANDOM}" 
+      container_name       = "${CLOUD_ENV}devopstfstate"
+      key                  = "terraform.tfstate"
+  }
+
+##########################
+Gitub Repo Secrets config: Azure Service Principal secrets we must add to the GitHub Repo Secrets:
+ARM_CLIENT_ID: $SERVICE_PRINCIPAL_CLIENT_ID
+ARM_CLIENT_SECRET: $SERVICE_PRINCIPAL_CLIENT_SECRET
+ARM_TENANT_ID: $SERVICE_PRINCIPAL_TENANT_ID
+ARM_SUBSCRIPTION_ID: $SERVICE_PRINCIPAL_SUBSCRIPTION_ID
+"
+echo

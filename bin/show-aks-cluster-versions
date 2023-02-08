@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+# this will run against the kube cluster you have active at runtime
+
+NODE_POOL=aks
+
+echo
+CLUSTER_NAME=$(kubectl config current-context)
+echo "CLUSTER_NAME: $CLUSTER_NAME"
+
+if [[ "$CLUSTER_NAME" == "aks-testaksterraform" ]]; then
+    RESOURCE_GROUP="rg-testaksterraform"
+fi
+
+if [[ "$CLUSTER_NAME" == "aks-developaksterraform" ]]; then
+    RESOURCE_GROUP="rg-developaksterraform"
+fi
+
+if [[ "$CLUSTER_NAME" == "aks-stageaksterraform" ]]; then
+    RESOURCE_GROUP="rg-stageaksterraform"
+fi
+
+if [[ "$CLUSTER_NAME" == "aks-prodaksterraform" ]]; then
+    RESOURCE_GROUP="rg-prodaksterraform"
+fi
+
+echo
+kubectl config current-context
+
+echo
+kubectl get nodes -o wide
+
+echo
+kubectl version --short
+echo
+
+NODE_VERSION=$(az aks nodepool show --cluster-name $CLUSTER_NAME --resource-group $RESOURCE_GROUP --name $NODE_POOL | jq -r .orchestratorVersion)
+echo "The AKS cluster: $CLUSTER_NAME nodepool version is: $NODE_VERSION"
+echo

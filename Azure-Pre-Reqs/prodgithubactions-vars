@@ -1,0 +1,11 @@
+DATE_TAG:2022.09.06.17.56.25
+ENV:prod
+SUBSCRIPTION_ID:xxxxxxxxxxxxxxx
+MY_RANDOM:10381
+LOCATION:westus
+RESOURCE_GROUP:proddevops
+STORAGE_ACCOUNT_NAME:proddevops10381
+CONTAINER_NAME:proddevopstfstate
+ENV_TAG:environment=proddevops
+SP_NAME:proddevops
+AZURE_KEY_VAULT_NAME:proddevops10381

@@ -1,0 +1,152 @@
+#!/bin/bash
+#set -x
+
+set -o pipefail
+
+# Bind certificate to the application
+# https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-nginx-tls#bind-certificate-to-application
+# https://azure.github.io/secrets-store-csi-driver-provider-azure/docs/configurations/ingress-tls/#optional-deploy-aad-pod-identity
+#
+# Application - The application deployment manifest declares and mounts the provider volume. Only when the application is deployed, 
+# is the certificate made available in the cluster, and when the application is removed the secret is removed as well. 
+# This scenario fits development teams who are responsible for the application’s security infrastructure and their integration with the cluster.
+#
+# NOTES:
+# README.md
+# We import the ingress TLS certificate to the cluster via 'Ingress Controller' method
+# The actual managed identity in azure has the naming convention: 'id-{ENV}aksterraform-pod' i.e.: id-developaksterraform-pod
+# The AzureIdentityBinding for pods (i.e.: ingress-nginx/ingress-nginx-controller) MUST match the selector i.e.: set 'AAD_POD_IDENTITY_NAME:podidentity'
+
+#az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
+
+function usage() {
+    printf "\nUsage: $0 [--debug ] [-help ] [-h]\n"
+    printf "\n--debug arg will execute the commands after the 'DEBUG' function calls\n"
+    exit
+}
+
+function DEBUG()
+{
+ [ "$_DEBUG" == "on" ] && "$@"
+}
+
+while test $# -ne 0; do
+  case $1 in
+
+    --help|-h)
+          usage;
+          exit $?;;
+
+    --debug)
+          _DEBUG="on"
+          DEBUG echo "debug mode true"
+          ;;
+
+    *)
+          usage
+          break;;
+  esac
+  shift
+done
+
+
+TFVARS="../../develop.tfvars"
+
+AZURE_TENANT_ID=$(awk -F "= " '/ingress_nginx_azure_tenant_id/ {print $2}' ${TFVARS} | sed 's/"//g')
+
+INGRESS_NGINX_NAMESPACE=$(awk -F "= " '/ingress_nginx_namespace/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_SOURCE_REGISTRY=$(awk -F "= " '/ingress_nginx_source_registry/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_REGISTRY_NAME=$(awk -F "= " '/azure_tenant_acr_registry_name/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_CONTROLLER_REGISTRY=$(awk -F "= " '/ingress_nginx_controller_registry/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_CONTROLLER_IMAGE=$(awk -F "= " '/ingress_nginx_controller_image/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_CONTROLLER_TAG=$(awk -F "= " '/ingress_nginx_controller_tag/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_PATCH_IMAGE=$(awk -F "= " '/ingress_nginx_patch_image/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_PATCH_TAG=$(awk -F "= " '/ingress_nginx_patch_tag/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_DEFAULTBACKEND_IMAGE=$(awk -F "= " '/ingress_nginx_defaultbackend_image/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_DEFAULTBACKEND_TAG=$(awk -F "= " '/ingress_nginx_defaultbackend_tag/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_HELM_CHART_RELEASE=$(awk -F "= " '/ingress_nginx_helm_chart_release/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_CONTROLLER_REPLICACOUNT=$(awk -F "= " '/ingress_nginx_controller_replicacount/ {print $2}' ${TFVARS} | sed 's/"//g')
+# The AzureIdentityBinding for pods (i.e.: ingress-nginx/ingress-nginx-controller) MUST match the selector i.e.: set 'AAD_POD_IDENTITY_NAME:podidentity'
+AAD_POD_IDENTITY_NAME=$(awk -F "= " '/aad_pod_identity_name/ {print $2}' ${TFVARS} | sed 's/"//g')
+INGRESS_NGINX_PRIMARY_AKV_NAME=$(awk -F "= " '/ingress_nginx_primary_akv_name/ {print $2}' ${TFVARS} | sed 's/"//g')
+# primary cert for subdomain the new order
+INGRESS_NGINX_PRIMARY_CERT_NAME=$(awk -F "= " '/ingress_nginx_primary_cert_name/ {print $2}' ${TFVARS} | sed 's/"//g')
+# secondary cert for top-level legacy support until migrated
+INGRESS_NGINX_SECONDARY_CERT_NAME=$(awk -F "= " '/ingress_nginx_secondary_cert_name/ {print $2}' ${TFVARS} | sed 's/"//g')
+
+
+##### START if called with `--debug`
+DEBUG echo 
+DEBUG echo "The below variables sourced from $CLOUD_ENV-vars.sh will be used to configure the helm repo:"
+DEBUG echo 
+
+DEBUG echo "INGRESS_NGINX_REGISTRY_NAME: $INGRESS_NGINX_REGISTRY_NAME"
+DEBUG echo "INGRESS_NGINX_SOURCE_REGISTRY: $INGRESS_NGINX_SOURCE_REGISTRY"
+DEBUG echo "INGRESS_NGINX_HELM_CHART_RELEASE: $INGRESS_NGINX_HELM_CHART_RELEASE"
+DEBUG echo "INGRESS_NGINX_CONTROLLER_IMAGE:INGRESS_NGINX_CONTROLLER_TAG: $INGRESS_NGINX_CONTROLLER_IMAGE:$INGRESS_NGINX_CONTROLLER_TAG"
+DEBUG echo "INGRESS_NGINX_SOURCE_REGISTRY/INGRESS_NGINX_PATCH_IMAGE:INGRESS_NGINX_PATCH_TAG: $INGRESS_NGINX_SOURCE_REGISTRY/$INGRESS_NGINX_PATCH_IMAGE:$INGRESS_NGINX_PATCH_TAG"
+DEBUG echo "INGRESS_NGINX_PATCH_IMAGE:INGRESS_NGINX_PATCH_TAG: $INGRESS_NGINX_PATCH_IMAGE:$INGRESS_NGINX_PATCH_TAG"
+DEBUG echo "INGRESS_NGINX_SOURCE_REGISTRY/INGRESS_NGINX_DEFAULTBACKEND_IMAGE:INGRESS_NGINX_DEFAULTBACKEND_TAG: $INGRESS_NGINX_SOURCE_REGISTRY/$INGRESS_NGINX_DEFAULTBACKEND_IMAGE:$INGRESS_NGINX_DEFAULTBACKEND_TAG"
+DEBUG echo "INGRESS_NGINX_DEFAULTBACKEND_IMAGE:INGRESS_NGINX_DEFAULTBACKEND_TAG: $INGRESS_NGINX_DEFAULTBACKEND_IMAGE:$INGRESS_NGINX_DEFAULTBACKEND_TAG"
+DEBUG echo ""
+DEBUG echo "Helm will use the following variables:"
+DEBUG echo "--namespace $INGRESS_NGINX_NAMESPACE"
+DEBUG echo "chart version: $INGRESS_NGINX_HELM_CHART_RELEASE"
+DEBUG echo "--set controller.image.registry=$INGRESS_NGINX_CONTROLLER_REGISTRY"
+DEBUG echo "--set controller.image.image=$INGRESS_NGINX_CONTROLLER_IMAGE"
+DEBUG echo "--set controller.image.tag=$INGRESS_NGINX_CONTROLLER_TAG"
+DEBUG echo "--set controller.admissionWebhooks.patch.image.registry=$INGRESS_NGINX_CONTROLLER_REGISTRY"
+DEBUG echo "--set controller.admissionWebhooks.patch.image.image=$INGRESS_NGINX_PATCH_IMAGE"
+DEBUG echo "--set controller.admissionWebhooks.patch.image.tag=$INGRESS_NGINX_PATCH_TAG"
+DEBUG echo "--set defaultBackend.image.registry=$INGRESS_NGINX_CONTROLLER_REGISTRY"
+DEBUG echo "--set defaultBackend.image.image=$INGRESS_NGINX_DEFAULTBACKEND_IMAGE"
+DEBUG echo "--set defaultBackend.image.tag=$INGRESS_NGINX_DEFAULTBACKEND_TAG" 
+
+DEBUG echo
+DEBUG echo "exiting"
+DEBUG echo 
+
+DEBUG exit
+###### END debug
+
+echo "the az acr import commands will error if already run disregard related errors"
+az acr import --name $INGRESS_NGINX_REGISTRY_NAME --source $INGRESS_NGINX_SOURCE_REGISTRY/$INGRESS_NGINX_CONTROLLER_IMAGE:$INGRESS_NGINX_CONTROLLER_TAG --image $INGRESS_NGINX_CONTROLLER_IMAGE:$INGRESS_NGINX_CONTROLLER_TAG
+az acr import --name $INGRESS_NGINX_REGISTRY_NAME --source $INGRESS_NGINX_SOURCE_REGISTRY/$INGRESS_NGINX_PATCH_IMAGE:$INGRESS_NGINX_PATCH_TAG --image $INGRESS_NGINX_PATCH_IMAGE:$INGRESS_NGINX_PATCH_TAG
+az acr import --name $INGRESS_NGINX_REGISTRY_NAME --source $INGRESS_NGINX_SOURCE_REGISTRY/$INGRESS_NGINX_DEFAULTBACKEND_IMAGE:$INGRESS_NGINX_DEFAULTBACKEND_TAG --image $INGRESS_NGINX_DEFAULTBACKEND_IMAGE:$INGRESS_NGINX_DEFAULTBACKEND_TAG
+
+echo "INGRESS_NGINX_REGISTRY_NAME --source INGRESS_NGINX_SOURCE_REGISTRY/INGRESS_NGINX_CONTROLLER_IMAGE:INGRESS_NGINX_CONTROLLER_TAG --image INGRESS_NGINX_CONTROLLER_IMAGE:INGRESS_NGINX_CONTROLLER_TAG"
+echo "$INGRESS_NGINX_REGISTRY_NAME --source $INGRESS_NGINX_SOURCE_REGISTRY/$INGRESS_NGINX_CONTROLLER_IMAGE:$INGRESS_NGINX_CONTROLLER_TAG --image $INGRESS_NGINX_CONTROLLER_IMAGE:$INGRESS_NGINX_CONTROLLER_TAG"
+
+# Add the ingress-nginx repository
+echo "the helm repo add will error if already added disregard"
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+kubectl create ns $INGRESS_NGINX_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+# Use Helm to deploy an NGINX ingress controller
+# https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-nginx-tls#bind-certificate-to-application
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+    --namespace $INGRESS_NGINX_NAMESPACE \
+    --version $INGRESS_NGINX_HELM_CHART_RELEASE \
+    --create-namespace \
+    --set rbac.create=true \
+    --set controller.replicaCount=2 \
+    --set controller.nodeSelector."kubernetes\.io/os"=linux \
+    --set defaultBackend.nodeSelector."beta\.kubernetes\.io/os"=linux \
+    --set controller.podLabels.aadpodidbinding=$AAD_POD_IDENTITY_NAME \
+    --set controller.admissionWebhooks.patch.nodeSelector."kubernetes\.io/os"=linux \
+    --set controller.image.registry=$INGRESS_NGINX_CONTROLLER_REGISTRY \
+    --set controller.image.image=$INGRESS_NGINX_CONTROLLER_IMAGE \
+    --set controller.image.tag=$INGRESS_NGINX_CONTROLLER_TAG \
+    --set controller.image.digest="" \
+    --set controller.admissionWebhooks.patch.image.registry=$INGRESS_NGINX_CONTROLLER_REGISTRY \
+    --set controller.admissionWebhooks.patch.image.image=$INGRESS_NGINX_PATCH_IMAGE \
+    --set controller.admissionWebhooks.patch.image.tag=$INGRESS_NGINX_PATCH_TAG \
+    --set controller.admissionWebhooks.patch.image.digest="" \
+    --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
+    --set defaultBackend.nodeSelector."kubernetes\.io/os"=linux \
+    --set defaultBackend.image.registry=$INGRESS_NGINX_CONTROLLER_REGISTRY \
+    --set defaultBackend.image.image=$INGRESS_NGINX_DEFAULTBACKEND_IMAGE \
+    --set defaultBackend.image.tag=$INGRESS_NGINX_DEFAULTBACKEND_TAG \
+    --set defaultBackend.image.digest=""

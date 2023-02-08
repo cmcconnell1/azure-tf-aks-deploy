@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+REGIONS="westus westus2 westus3"
+printf "\nfetching supported AKS cluster versions from Azure regions\n"
+
+for REGION in $REGIONS; do
+    printf "\nREGION: $REGION\n"
+    az aks get-versions --location $REGION --query "orchestrators[].orchestratorVersion"
+done
+    
+#echo "westus"
+#az aks get-versions --location westus --query "orchestrators[].orchestratorVersion"
+#
+#echo "westus2"
+#az aks get-versions --location westus2 --query "orchestrators[].orchestratorVersion"
+#
+#echo "westus3"
+#az aks get-versions --location westus3 --query "orchestrators[].orchestratorVersion"

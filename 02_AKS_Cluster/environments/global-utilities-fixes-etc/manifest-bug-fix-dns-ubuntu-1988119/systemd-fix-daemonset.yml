@@ -1,0 +1,45 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: systemd-fix-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      job: systemd-fix-daemonset
+  template:
+    metadata:
+      labels:
+        job: systemd-fix-daemonset
+    spec:
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+        effect: NoSchedule
+      - key: WORKLOAD
+        operator: Exists
+        effect: NoSchedule
+      volumes:
+        - name: hostfs
+          hostPath:
+            path: /
+      hostPID: true
+      restartPolicy: Always
+      nodeSelector:
+        "kubernetes.io/os": linux
+      initContainers:
+        - name: init
+          image: alpine
+          command:
+            - /bin/sh
+            - -xc
+            - | 
+              chroot /host \
+              /bin/grep -v ^# /host/etc/systemd/resolved.conf | /bin/grep -qxF 'FallbackDNS=168.63.129.16' /host/etc/systemd/resolved.conf || echo 'FallbackDNS=168.63.129.16' >> /host/etc/systemd/resolved.conf && chroot /host /bin/systemctl restart systemd-resolved
+          volumeMounts:
+            - name: hostfs
+              mountPath: /host
+      containers:
+        - name: sleep
+          image: kubernetes/pause
