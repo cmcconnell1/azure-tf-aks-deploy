@@ -3,9 +3,15 @@
 
 ## Terraform deployed Azure infra using Github Actions
 ### Overview
-- This project's utilities/scripts, etc. provide:
+- This project provides tools/utils for various critical and ongoing operational concerns including:
   - Terraform IAC deployments for multiple AKS clusters in multiple environments (Develop, Test, Stage, and Production) and tenants (Dev/Test and Production) in Azure.
   - GitHub Actions (GHA) based workflows (and Terraform wrapper scripts for Ops usage outside of GHA), using multiple Github environments for each distinct Azure AKS cluster (deploying into two separate Azure tenants).
+  - Greenfield / First time only requirements setting up the (Azure Tenant based) environment (i.e. requisite service accounts, Terraform remote cloud bucket secure statefiles, etc)
+  - scripts for showing the secrets/vars for the Azure Service Principal that drives/owns the automation.
+  - scripts for showing the existing Azure Tenant based Service Principal roles.
+  - supporting scripts and processes for Upgrading the Azure AKS clusters (and requisite pre-preparation etc)
+  - scripts for running commands on the AKS nodes--yes, this is something we should never have to do but if your unlucky enough to have to work in Azure when they push our broken images globally that break all AKS nodes DNS (and they dont report this as an outage)...
+
 
 ![Architecture Diagram AKS deployment](assets/archdiagram_k8s.jpg?raw=true "Architecture Diagram AKS deployment")
 
