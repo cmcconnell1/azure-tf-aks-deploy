@@ -1,5 +1,6 @@
 # Azure-Terraform-Deployments
 
+
 ## Terraform deployed Azure infra using Github Actions
 ### Overview
 - This project's utilities/scripts, etc. provide:
@@ -248,3 +249,6 @@ Azure Key Vault provider for Secrets Store CSI Driver allows you to get secret c
   - [Production Storage Account: proddevops10381 Containers](https://portal.azure.com/#@mviproduction.onmicrosoft.com/resource/subscriptions/xxxxxxxxxxxxxxx/resourceGroups/proddevops/providers/Microsoft.Storage/storageAccounts/proddevops10381/overview)
       - Currently we should have the following container:
         - production-aks-cluster-tfstate
+
+# References / Credits, etc.
+- This project based its Terraform modules which were initially from [Bart Jensons older and now possibly? deprecated repo](https://github.com/bart-jansen/terraform-aks-appgw-acr-keyvault-loganalytics)
