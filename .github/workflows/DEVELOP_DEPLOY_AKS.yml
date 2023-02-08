@@ -73,7 +73,7 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - uses: azure/setup-kubectl@v3.1
+    - uses: azure/setup-kubectl@v3.2
 
     - uses: azure/aks-set-context@v3
       with:
